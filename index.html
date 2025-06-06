@@ -1,0 +1,335 @@
+
+<!DOCTYPE html>
+
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<title>강민구RPG v060617 (플레이어회피적용)</title>
+<style>
+    body { font-family: sans-serif; margin: 0; padding: 20px; }
+    #gameContainer { display: flex; justify-content: center; gap: 40px; position: relative; }
+    .character, .monster { width: 35%; }
+    .hp-bar, .mp-bar { height: 20px; margin-bottom: 5px; border: 1px solid #ccc; border-radius: 3px; }
+    .hp-fill { height: 100%; background-color: red; transition: width 0.5s; }
+    .mp-fill { height: 100%; background-color: blue; transition: width 0.5s; }
+    #statBox {
+      position: absolute; top: 20px; right: 10px;
+      border: 1px solid #ccc; padding: 10px; border-radius: 5px;
+      background: #f9f9f9; width: 180px;
+    }
+    .log-box { width: 100%; height: 150px; margin-top: 20px; background: #eee; overflow-y: auto; padding: 10px; }
+    .button-container { margin-top: 10px; }
+    button { margin-right: 5px; }
+  </style>
+</head>
+<body>
+<h2>강민구RPG v060608</h2>
+<div id="gameContainer">
+<div class="character">
+<h3>🧍‍♂️ 강민구</h3>
+<div class="hp-bar"><div class="hp-fill" id="playerHPBar" style="width: 100%;"></div></div>
+<div class="mp-bar"><div class="mp-fill" id="playerMPBar" style="width: 100%;"></div></div>
+<div>HP <span id="playerHPText">60</span> / MP <span id="playerMPText">41</span></div>
+</div>
+<div class="monster">
+<h3>🦊 여우</h3>
+<div class="hp-bar"><div class="hp-fill" id="monsterHPBar" style="width: 100%;"></div></div>
+<div class="mp-bar"><div class="mp-fill" id="monsterMPBar" style="width: 100%;"></div></div>
+<div>HP <span id="monsterHPText">40</span> / MP <span id="monsterMPText">30</span></div>
+</div>
+<div id="statBox">
+<b>📊 스탯</b><br/>
+힘: <span id="strStat">33</span> <button onclick="addStat('str')">+</button><br/>
+체력: <span id="conStat">30</span> <button onclick="addStat('con')">+</button><br/>
+민첩: <span id="dexStat">27</span> <button onclick="addStat('dex')">+</button><br/>
+지력: <span id="intStat">62</span> <button onclick="addStat('int')">+</button><br/>
+보유 스탯: <span id="statPoint">10</span><br/>
+EXP: <span id="expStat">0/100</span>
+</div>
+</div>
+<div class="log-box" id="logBox">1층 진행합니다</div>
+<div class="button-container">
+<button onclick="attack()">공격</button>
+<button onclick="useSkill('서류 던지기')">서류 던지기</button>
+<button onclick="useSkill('민구는 휴가중')">민구는 휴가중</button>
+<button onclick="nextFloor()">다음 층</button>
+</div>
+<script>
+let playerHP = 60;
+let playerMP = 41;
+let playerMaxHP = 60;
+let playerMaxMP = 41;
+let playerStr = 33;
+let playerCon = 30;
+let playerDex = 27;
+let playerInt = 62;
+let playerEXP = 0;
+let playerLV = 1;
+let currentFloor = 1;
+
+let monster = {};
+let monsterList = [
+  { name: "여우", str: 20, con: 10, dex: 10, int: 40, floors: [1,10], exp: 30, weight: 10 },
+  { name: "늑대", str: 40, con: 70, dex: 50, int: 20, floors: [1,15], exp: 40, weight: 3 },
+  { name: "고블린", str: 30, con: 50, dex: 20, int: 30, floors: [6,20], exp: 50, weight: 5 },
+  { name: "슬라임", str: 20, con: 100, dex: 300, int: 10, floors: [6,15], exp: 200, weight: 1 },
+  { name: "오크", str: 60, con: 80, dex: 40, int: 20, floors: [20,25], exp: 80, weight: 2 }
+];
+
+function log(text) {
+  const logBox = document.getElementById('logBox');
+  logBox.innerHTML += '<br>' + text;
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function updateUI() {
+  document.getElementById('playerHPText').textContent = playerHP;
+  document.getElementById('playerMPText').textContent = playerMP;
+  document.getElementById('monsterHPText').textContent = monster.hp;
+  document.getElementById('monsterMPText').textContent = monster.mp;
+  document.getElementById('playerHPBar').style.width = (playerHP / playerMaxHP * 100) + "%";
+  document.getElementById('playerMPBar').style.width = (playerMP / playerMaxMP * 100) + "%";
+  document.getElementById('monsterHPBar').style.width = (monster.hp / monster.maxHp * 100) + "%";
+  document.getElementById('monsterMPBar').style.width = "100%";
+  document.querySelector('.monster h3').textContent = monster.emoji + " " + monster.name + ` (${currentFloor}층)`;
+  document.querySelector('.monster div:last-child').textContent = currentFloor + "층";
+}
+
+function gainEXP(amount) {
+  playerEXP += amount;
+  let needed = 100 + (playerLV - 1) * 20;
+  if (playerEXP >= needed) {
+    playerEXP -= needed;
+    playerLV += 1;
+    playerMaxHP += 10;
+    playerMaxMP += 5;
+    playerHP = playerMaxHP;
+    playerMP = playerMaxMP;
+    log(`레벨업! Lv.${playerLV}`);
+  }
+  document.getElementById('statBox').innerHTML = `<b>📊 스탯</b><br />
+  힘: ${playerStr}<br />체력: ${playerCon}<br />민첩: ${playerDex}<br />지력: ${playerInt}<br />EXP: ${playerEXP}/${needed}`;
+}
+
+function endTurn() {
+  if (monster.hp > 0) {
+    if (!isPlayerHit(monster.dex)) {
+      log("강민구가 공격을 회피했습니다!");
+    } else {
+      const counterDamage = Math.floor(Math.random() * 6) + Math.floor(monster.str / 10);
+      playerHP -= counterDamage;
+      if (playerHP < 0) playerHP = 0;
+      log("몬스터의 반격! 데미지: " + counterDamage);
+      updateUI();
+      if (playerHP <= 0) {
+        alert("강민구가 쓰러졌습니다. 게임을 다시 시작합니다.");
+        location.reload();
+      }
+    }
+  }
+
+  if (monster.hp <= 0) {
+    log('몬스터를 처치했습니다!');
+    gainEXP(monster.exp);
+    document.querySelectorAll("button").forEach(btn => btn.disabled = true);
+    document.querySelector("button[onclick='nextFloor()']").disabled = false;
+  }
+}
+
+function attack() {
+  const damage = Math.floor(Math.random() * 6) + 5 + Math.floor(playerStr / 10);
+  monster.hp -= damage;
+  if (monster.hp < 0) monster.hp = 0;
+  log('강민구의 공격! 데미지: ' + damage);
+  updateUI();
+  setTimeout(endTurn, 1000);
+}
+
+function useSkill(skill) {
+  if (skill === '서류 던지기') {
+    if (playerMP < 10) return log("MP가 부족합니다.");
+    playerMP -= 10;
+    const damage = 10 + Math.floor(playerStr / 10) + Math.floor(playerInt / 5);
+    monster.hp -= damage;
+    if (monster.hp < 0) monster.hp = 0;
+    log(`스킬 사용: 서류 던지기! 데미지: ${damage}`);
+  } else if (skill === '민구는 휴가중') {
+    if (playerMP < 30) return log("MP가 부족합니다.");
+    playerMP -= 30;
+    const heal = 30 + Math.floor(playerCon / 10) + Math.floor(playerInt / 5);
+    playerHP += heal;
+    if (playerHP > playerMaxHP) playerHP = playerMaxHP;
+    log(`스킬 사용: 민구는 휴가중! 회복량: ${heal}`);
+  }
+  updateUI();
+  setTimeout(endTurn, 1000);
+}
+
+function selectMonster(floor) {
+  let candidates = [];
+  monsterList.forEach(mon => {
+    if (floor >= mon.floors[0] && floor <= mon.floors[1]) {
+      for (let i = 0; i < mon.weight; i++) {
+        candidates.push(mon);
+      }
+    }
+  });
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const hp = 30 + chosen.con + (floor - 1) * 2;
+  const mp = 10 + Math.floor(chosen.int / 2) + (floor - 1) * 1;
+  return {
+    ...chosen,
+    hp: hp,
+    maxHp: hp,
+    mp: mp,
+    emoji: getEmoji(chosen.name)
+  };
+}
+
+function getEmoji(name) {
+  if (name === "여우") return "🦊";
+  if (name === "늑대") return "🐺";
+  if (name === "고블린") return "👺";
+  if (name === "슬라임") return "🟦";
+  if (name === "오크") return "🧟";
+  return "👾";
+}
+
+function nextFloor() {
+  currentFloor++;
+  log(`<br>${currentFloor}층 진입합니다.`);
+  monster = selectMonster(currentFloor);
+  playerHP = Math.min(playerHP + 10, playerMaxHP);
+  playerMP = Math.min(playerMP + 5, playerMaxMP);
+  document.querySelectorAll("button").forEach(btn => btn.disabled = false);
+  updateUI();
+}
+
+// 게임 시작 시 초기화
+monster = selectMonster(currentFloor);
+window.onload = updateUI;
+
+
+let statPoint = 10; // 시작 보유 스탯
+
+function updateStatUI() {
+  document.getElementById("strStat").textContent = playerStr;
+  document.getElementById("conStat").textContent = playerCon;
+  document.getElementById("dexStat").textContent = playerDex;
+  document.getElementById("intStat").textContent = playerInt;
+  document.getElementById("statPoint").textContent = statPoint;
+  document.getElementById("expStat").textContent = `${playerEXP}/${100 + (playerLV - 1) * 20}`;
+}
+
+function addStat(stat) {
+  if (statPoint <= 0) return;
+  if (stat === 'str') playerStr++;
+  if (stat === 'con') { playerCon++; playerMaxHP++; }
+  if (stat === 'dex') playerDex++;
+  if (stat === 'int') { playerInt++; playerMaxMP++; }
+  statPoint--;
+  updateStatUI();
+  updateUI();
+}
+
+const originalGainEXP = gainEXP;
+gainEXP = function(amount) {
+  playerEXP += amount;
+  let needed = 100 + (playerLV - 1) * 20;
+  if (playerEXP >= needed) {
+    playerEXP -= needed;
+    playerLV += 1;
+    playerMaxHP += 10;
+    playerMaxMP += 5;
+    statPoint += 5;
+    playerHP = playerMaxHP;
+    playerMP = playerMaxMP;
+    log(`레벨업! Lv.${playerLV} (보유 스탯 +5)`);
+  }
+  updateStatUI();
+};
+window.onload = () => {
+  updateStatUI();
+  updateUI();
+};
+
+
+function getHitChance() {
+  return 100 + (playerDex * 0.1);
+}
+
+function getDodgeChance(monDex) {
+  return monDex * 0.1;
+}
+
+function calcSkillDamage(skill) {
+  if (skill === "서류 던지기") {
+    return 10 + Math.floor(playerStr / 10) + Math.floor(playerInt / 5);
+  }
+  return 0;
+}
+
+function calcHealAmount() {
+  return 30 + Math.floor(playerCon / 10) + Math.floor(playerInt / 5);
+}
+
+function isHit(monDex) {
+  let hitChance = getHitChance();
+  let dodgeChance = getDodgeChance(monDex);
+  let successRate = hitChance - dodgeChance;
+  return Math.random() * 100 < successRate;
+}
+
+// attack 함수 수정
+attack = function() {
+  if (!isHit(monster.dex)) {
+    log("강민구의 공격! 하지만 빗나갔습니다!");
+    setTimeout(endTurn, 1000);
+    return;
+  }
+  const damage = Math.floor(Math.random() * 6) + 5 + Math.floor(playerStr / 10);
+  monster.hp -= damage;
+  if (monster.hp < 0) monster.hp = 0;
+  log('강민구의 공격! 데미지: ' + damage);
+  updateUI();
+  setTimeout(endTurn, 1000);
+};
+
+// useSkill 수정
+useSkill = function(skill) {
+  if (skill === '서류 던지기') {
+    if (playerMP < 10) return log("MP가 부족합니다.");
+    if (!isHit(monster.dex)) {
+      log("서류 던지기! 하지만 빗나갔습니다!");
+      playerMP -= 10;
+      updateUI();
+      setTimeout(endTurn, 1000);
+      return;
+    }
+    playerMP -= 10;
+    const damage = calcSkillDamage("서류 던지기");
+    monster.hp -= damage;
+    if (monster.hp < 0) monster.hp = 0;
+    log(`스킬 사용: 서류 던지기! 데미지: ${damage}`);
+  } else if (skill === '민구는 휴가중') {
+    if (playerMP < 30) return log("MP가 부족합니다.");
+    playerMP -= 30;
+    const heal = calcHealAmount();
+    playerHP += heal;
+    if (playerHP > playerMaxHP) playerHP = playerMaxHP;
+    log(`스킬 사용: 민구는 휴가중! 회복량: ${heal}`);
+  }
+  updateUI();
+  setTimeout(endTurn, 1000);
+}
+
+
+function isPlayerHit(monDex) {
+  const monAcc = 100 + monDex * 0.1;
+  const playerDodge = playerDex * 0.1;
+  const successRate = monAcc - playerDodge;
+  return Math.random() * 100 < successRate;
+}
+</script>
+</body>
+</html>
